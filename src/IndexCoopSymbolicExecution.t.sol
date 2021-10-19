@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-pragma solidity ^0.8.6;
+pragma solidity 0.6.10;
 
 import "ds-test/test.sol";
 
@@ -12,11 +12,7 @@ contract IndexCoopSymbolicExecutionTest is DSTest {
         execution = new IndexCoopSymbolicExecution();
     }
 
-    function testFail_basic_sanity() public {
-        assertTrue(false);
-    }
-
-    function test_basic_sanity() public {
-        assertTrue(true);
+    function prove_password(uint256 _password) public {
+        assertTrue(!execution.isPasswordCorrect(_password));
     }
 }
