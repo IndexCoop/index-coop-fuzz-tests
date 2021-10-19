@@ -1,3 +1,6 @@
 [submodule "lib/ds-test"]
 	path = lib/ds-test
 	url = https://github.com/dapphub/ds-test
+[submodule "lib/index-coop-smart-contracts"]
+	path = lib/index-coop-smart-contracts
+	url = https://github.com/ncitron/index-coop-smart-contracts
