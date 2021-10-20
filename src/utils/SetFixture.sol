@@ -36,9 +36,23 @@ contract SetFixture {
 
         integrationRegistry = new IntegrationRegistry(controllerInterface);
         setTokenCreator = new SetTokenCreator(controllerInterface);
+
         airdropModule = new AirdropModule(controllerInterface);
         basicIssuanceModule = new BasicIssuanceModule(controllerInterface);
         generalIndexModule = new GeneralIndexModule(controllerInterface, wethInterface);
         wrapModuleV2 = new WrapModuleV2(controllerInterface, wethInterface);
+
+        address[] memory factories = new address[](1);
+        address[] memory modules = new address[](4);
+        address[] memory resources = new address[](0);
+        uint256[] memory resourceIds = new uint256[](0);
+
+        factories[0] = address(setTokenCreator);
+        modules[0] = address(generalIndexModule);
+        modules[1] = address(basicIssuanceModule);
+        modules[2] = address(airdropModule);
+        modules[3] = address(wrapModuleV2); 
+
+        controller.initialize(factories, modules, resources, resourceIds);
     }
 }
