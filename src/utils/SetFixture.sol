@@ -45,14 +45,16 @@ contract SetFixture {
 
         address[] memory factories = new address[](1);
         address[] memory modules = new address[](4);
-        address[] memory resources = new address[](0);
-        uint256[] memory resourceIds = new uint256[](0);
+        address[] memory resources = new address[](1);
+        uint256[] memory resourceIds = new uint256[](1);
 
         factories[0] = address(setTokenCreator);
         modules[0] = address(generalIndexModule);
         modules[1] = address(basicIssuanceModule);
         modules[2] = address(airdropModule);
-        modules[3] = address(wrapModuleV2); 
+        modules[3] = address(wrapModuleV2);
+        resources[0] = address(integrationRegistry);
+        resourceIds[0] = 0;
 
         controller.initialize(factories, modules, resources, resourceIds);
     }
