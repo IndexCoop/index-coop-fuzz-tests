@@ -35,6 +35,8 @@ contract IntrinsicProdRebalancing is DSTest {
     BaseManagerV2 baseManager;
     IPRebalanceExtension ipRebalanceExtension;
 
+    address[] components;
+
     StandardTokenMock dai;
     WrapTokenMock cDai;
     WrapTokenMock yDai;
@@ -67,7 +69,7 @@ contract IntrinsicProdRebalancing is DSTest {
         yDai.mint(2**96);
 
         // create set
-        address[] memory components = new address[](3);
+        components = new address[](3);
         components[0] = address(dai);
         components[1] = address(cDai);
         components[2] = address(yDai);
@@ -123,11 +125,6 @@ contract IntrinsicProdRebalancing is DSTest {
     }
 
     function test_untransform(uint96 targetDaiUnits, uint96 targetCDaiUnitsUnderlying, uint96 targetYDaiUnitsUnderlying) public {
-        address[] memory components = new address[](3);
-        components[0] = address(dai);
-        components[1] = address(cDai);
-        components[2] = address(yDai);
-
         uint256[] memory units = new uint256[](3);
         units[0] = targetDaiUnits;
         units[1] = targetCDaiUnitsUnderlying;
@@ -181,12 +178,6 @@ contract IntrinsicProdRebalancing is DSTest {
     function test_transform(uint96 targetDaiUnits, uint96 targetCDaiUnitsUnderlying, uint96 targetYDaiUnitsUnderlying) public {
 
         // setup
-
-        address[] memory components = new address[](3);
-        components[0] = address(dai);
-        components[1] = address(cDai);
-        components[2] = address(yDai);
-
         uint256[] memory units = new uint256[](3);
         units[0] = targetDaiUnits;
         units[1] = targetCDaiUnitsUnderlying;
@@ -194,18 +185,9 @@ contract IntrinsicProdRebalancing is DSTest {
 
         ipRebalanceExtension.startIPRebalance(components, units);
 
-        {
+        for (uint256 i = 0; i < components.length; i++) {
             address[] memory transformComponents = new address[](1);
-            transformComponents[0] = address(cDai);
-            bytes[] memory untransformData = new bytes[](1);
-            untransformData[0] = bytes("");
-
-            try ipRebalanceExtension.batchUntransform(transformComponents, untransformData) {} catch {}
-        }
-
-        {
-            address[] memory transformComponents = new address[](1);
-            transformComponents[0] = address(yDai);
+            transformComponents[0] = address(components[i]);
             bytes[] memory untransformData = new bytes[](1);
             untransformData[0] = bytes("");
 
@@ -246,6 +228,44 @@ contract IntrinsicProdRebalancing is DSTest {
         uint256 finalYDaiUnits = setToken.getDefaultPositionRealUnit(address(yDai)).toUint256();
         uint256 finalYDaiUnitsUnderlying = finalYDaiUnits.preciseDiv(yDaiExchangeRate);
         assertTrue(isApproxEqual(finalYDaiUnitsUnderlying, targetYDaiUnitsUnderlying) || daiUnits == 0);
+    }
+
+    function test_transformRemaining(
+        uint96 targetCDaiUnitsUnderlying,
+        uint96 targetYDaiUnitsUnderlying,
+        uint256 componentIndexSeed
+    ) 
+        public 
+    {
+        // setup
+        uint256[] memory units = new uint256[](3);
+        units[0] = 0;   // target dai units must be 0
+        units[1] = targetCDaiUnitsUnderlying;
+        units[2] = targetYDaiUnitsUnderlying;
+
+        ipRebalanceExtension.startIPRebalance(components, units);
+
+        for (uint256 i = 0; i < components.length; i++) {
+            address[] memory transformComponents = new address[](1);
+            transformComponents[0] = address(components[i]);
+            bytes[] memory untransformData = new bytes[](1);
+            untransformData[0] = bytes("");
+
+            try ipRebalanceExtension.batchUntransform(transformComponents, untransformData) {} catch {}
+        }
+
+        ipRebalanceExtension.startTrades();
+        ipRebalanceExtension.setTradesComplete();
+
+        // perform transfromRamining
+
+        uint256 componentIndex = componentIndexSeed % components.length;
+        try ipRebalanceExtension.transformRemaining(components[componentIndex], bytes("")) {} catch {}
+
+        (address underlying, ) = ipRebalanceExtension.transformComponentInfo(components[componentIndex]);
+        uint256 finalUnderlyingUnits = setToken.getDefaultPositionRealUnit(underlying).toUint256();
+
+        assertEq(finalUnderlyingUnits, 0);
     }
 
     function isApproxEqual(uint256 a, uint256 b) internal pure returns (bool) {
