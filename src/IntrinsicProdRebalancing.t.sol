@@ -268,6 +268,38 @@ contract IntrinsicProdRebalancing is DSTest {
         assertEq(finalUnderlyingUnits, 0);
     }
 
+    function test_startTrades(uint96 targetDaiUnits, uint96 targetCDaiUnitsUnderlying, uint96 targetYDaiUnitsUnderlying) public {
+
+        uint256[] memory units = new uint256[](3);
+        units[0] = targetDaiUnits;
+        units[1] = targetCDaiUnitsUnderlying;
+        units[2] = targetYDaiUnitsUnderlying;
+
+        ipRebalanceExtension.startIPRebalance(components, units);
+
+        for (uint256 i = 0; i < components.length; i++) {
+            address[] memory transformComponents = new address[](1);
+            transformComponents[0] = address(components[i]);
+            bytes[] memory untransformData = new bytes[](1);
+            untransformData[0] = bytes("");
+
+            try ipRebalanceExtension.batchUntransform(transformComponents, untransformData) {} catch {}
+        }
+
+        ipRebalanceExtension.startTrades();
+
+        uint256 currentYDaiUnderlying = setToken.getDefaultPositionRealUnit(address(yDai)).toUint256().preciseDiv(yDaiExchangeRate);
+        uint256 currentCDaiUnderlying = setToken.getDefaultPositionRealUnit(address(cDai)).toUint256().preciseDiv(cDaiExchangeRate);
+
+        uint256 targetSum = uint256(targetDaiUnits) + uint256(targetCDaiUnitsUnderlying) + uint256(targetYDaiUnitsUnderlying);
+        uint256 currentSum = currentYDaiUnderlying + currentCDaiUnderlying;
+
+        uint256 daiTarget = targetSum > currentSum ? targetSum - currentSum : 0;
+        (uint256 actualDaiTarget, , , , , ) = setFixture.generalIndexModule().executionInfo(ISetTokenSet(address(setToken)), dai);
+
+        assertEq(actualDaiTarget, daiTarget);
+    }
+
     function isApproxEqual(uint256 a, uint256 b) internal pure returns (bool) {
         return a == b || a == b+1 || a+1 == b;
     }
