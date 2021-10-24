@@ -82,6 +82,7 @@ contract IntrinsicProdRebalancing is DSTest {
         baseManager.authorizeInitialization();
         setFixture.wrapModuleV2().initialize(ISetTokenSet(address(setToken)));
         setFixture.basicIssuanceModule().initialize(ISetTokenSet(address(setToken)), IManagerIssuanceHook(address(0)));
+        setFixture.generalIndexModule().initialize(ISetTokenSet(address(setToken)));
         setToken.setManager(address(baseManager));
 
         // issue some sets
@@ -137,25 +138,25 @@ contract IntrinsicProdRebalancing is DSTest {
         uint256 initCDaiUnits = setToken.getDefaultPositionRealUnit(address(cDai)).toUint256();
         uint256 initCDaiUnitsUnderlying = initCDaiUnits.preciseDiv(cDaiExchangeRate);
 
-        if (targetCDaiUnitsUnderlying < initCDaiUnitsUnderlying) {
+        {
             address[] memory transformComponents = new address[](1);
             transformComponents[0] = address(cDai);
             bytes[] memory untransformData = new bytes[](1);
             untransformData[0] = bytes("");
 
-            ipRebalanceExtension.batchUntransform(transformComponents, untransformData);
+            try ipRebalanceExtension.batchUntransform(transformComponents, untransformData) {} catch {}
         }
 
         uint256 initYDaiUnits = setToken.getDefaultPositionRealUnit(address(yDai)).toUint256();
         uint256 initYDaiUnitsUnderlying = initYDaiUnits.preciseDiv(yDaiExchangeRate);
 
-        if (targetYDaiUnitsUnderlying < initYDaiUnitsUnderlying) {
+        {
             address[] memory transformComponents = new address[](1);
             transformComponents[0] = address(yDai);
             bytes[] memory untransformData = new bytes[](1);
             untransformData[0] = bytes("");
 
-            ipRebalanceExtension.batchUntransform(transformComponents, untransformData);
+            try ipRebalanceExtension.batchUntransform(transformComponents, untransformData) {} catch {}
         }
 
         uint256 finalCDaiUnits = setToken.getDefaultPositionRealUnit(address(cDai)).toUint256();
@@ -175,6 +176,76 @@ contract IntrinsicProdRebalancing is DSTest {
             initYDaiUnitsUnderlying;
         
         assertTrue(isApproxEqual(finalYDaiUnitsUnderlying, expectedYDaiUnitsUnderlying));
+    }
+
+    function test_transform(uint96 targetDaiUnits, uint96 targetCDaiUnitsUnderlying, uint96 targetYDaiUnitsUnderlying) public {
+
+        // setup
+
+        address[] memory components = new address[](3);
+        components[0] = address(dai);
+        components[1] = address(cDai);
+        components[2] = address(yDai);
+
+        uint256[] memory units = new uint256[](3);
+        units[0] = targetDaiUnits;
+        units[1] = targetCDaiUnitsUnderlying;
+        units[2] = targetYDaiUnitsUnderlying;
+
+        ipRebalanceExtension.startIPRebalance(components, units);
+
+        {
+            address[] memory transformComponents = new address[](1);
+            transformComponents[0] = address(cDai);
+            bytes[] memory untransformData = new bytes[](1);
+            untransformData[0] = bytes("");
+
+            try ipRebalanceExtension.batchUntransform(transformComponents, untransformData) {} catch {}
+        }
+
+        {
+            address[] memory transformComponents = new address[](1);
+            transformComponents[0] = address(yDai);
+            bytes[] memory untransformData = new bytes[](1);
+            untransformData[0] = bytes("");
+
+            try ipRebalanceExtension.batchUntransform(transformComponents, untransformData) {} catch {}
+        }
+
+        ipRebalanceExtension.startTrades();
+        ipRebalanceExtension.setTradesComplete();
+
+        // do transforms
+        {
+            address[] memory transformComponents = new address[](1);
+            transformComponents[0] = address(cDai);
+            bytes[] memory transformData = new bytes[](1);
+            transformData[0] = bytes("");
+
+            try ipRebalanceExtension.batchTransform(transformComponents, transformData) {} catch {}
+        }
+
+
+        {
+            address[] memory transformComponents = new address[](1);
+            transformComponents[0] = address(yDai);
+            bytes[] memory transformData = new bytes[](1);
+            transformData[0] = bytes("");
+
+            try ipRebalanceExtension.batchTransform(transformComponents, transformData) {} catch {}
+        }
+
+        // checks
+
+        uint256 daiUnits = setToken.getDefaultPositionRealUnit(address(dai)).toUint256();
+
+        uint256 finalCDaiUnits = setToken.getDefaultPositionRealUnit(address(cDai)).toUint256();
+        uint256 finalCDaiUnitsUnderlying = finalCDaiUnits.preciseDiv(cDaiExchangeRate);
+        assertTrue(isApproxEqual(finalCDaiUnitsUnderlying, targetCDaiUnitsUnderlying) || daiUnits == 0);
+
+        uint256 finalYDaiUnits = setToken.getDefaultPositionRealUnit(address(yDai)).toUint256();
+        uint256 finalYDaiUnitsUnderlying = finalYDaiUnits.preciseDiv(yDaiExchangeRate);
+        assertTrue(isApproxEqual(finalYDaiUnitsUnderlying, targetYDaiUnitsUnderlying) || daiUnits == 0);
     }
 
     function isApproxEqual(uint256 a, uint256 b) internal pure returns (bool) {
