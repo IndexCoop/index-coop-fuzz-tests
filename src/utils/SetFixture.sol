@@ -27,14 +27,15 @@ contract SetFixture {
 
     WETH9 public weth;
 
-    constructor() public {
+    constructor(address _owner) public {
         weth = new WETH9();
-        controller = new Controller(msg.sender);
+        controller = new Controller(_owner);
 
         IWETH wethInterface = IWETH(address(weth));
         IController controllerInterface = IController(address(controller));
 
         integrationRegistry = new IntegrationRegistry(controllerInterface);
+        integrationRegistry.transferOwnership(_owner);
         setTokenCreator = new SetTokenCreator(controllerInterface);
 
         airdropModule = new AirdropModule(controllerInterface);
