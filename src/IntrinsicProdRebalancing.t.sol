@@ -48,13 +48,6 @@ contract IntrinsicProdRebalancing is DSTest {
 
     function setUp() public {
         setFixture = new SetFixture(address(this));
-        SetTokenCreator factory = setFixture.setTokenCreator();
-
-        address[] memory modules = new address[](4);
-        modules[0] = address(setFixture.generalIndexModule());
-        modules[1] = address(setFixture.basicIssuanceModule());
-        modules[2] = address(setFixture.airdropModule());
-        modules[3] = address(setFixture.wrapModuleV2());
 
         // create mock components
         dai = new StandardTokenMock(address(this), 2**256-1, "DAI", "DAI", 18);
@@ -68,6 +61,31 @@ contract IntrinsicProdRebalancing is DSTest {
         dai.approve(address(yDai), 2**96);
         yDai.mint(2**96);
 
+        // setup wrap adapter
+        CompoundWrapV2Adapter wrapAdapter = new CompoundWrapV2Adapter();
+        setFixture.integrationRegistry().addIntegration(address(setFixture.wrapModuleV2()), "MockWrapV2Adapter", address(wrapAdapter));
+
+        // deploy TransferHelpers
+        compTransformHelper = new TransformHelperMock(cDaiExchangeRate, address(setFixture.wrapModuleV2()), "MockWrapV2Adapter");
+        yearnTransformHelper = new TransformHelperMock(yDaiExchangeRate, address(setFixture.wrapModuleV2()), "MockWrapV2Adapter");
+    }
+
+    function initSet(
+        uint96 daiUnderlyingUnits,
+        uint96 cDaiUnderlyingUnits,
+        uint96 yDaiUnderlyingUnits
+    )
+        private
+        returns (bool)
+    {
+        SetTokenCreator factory = setFixture.setTokenCreator();
+
+        address[] memory modules = new address[](4);
+        modules[0] = address(setFixture.generalIndexModule());
+        modules[1] = address(setFixture.basicIssuanceModule());
+        modules[2] = address(setFixture.airdropModule());
+        modules[3] = address(setFixture.wrapModuleV2());
+
         // create set
         components = new address[](3);
         components[0] = address(dai);
@@ -75,11 +93,36 @@ contract IntrinsicProdRebalancing is DSTest {
         components[2] = address(yDai);
 
         int256[] memory units = new int256[](3);
-        units[0] = 0.7 ether;
-        units[1] = cDaiExchangeRate.preciseMul(0.3 ether).toInt256();
-        units[2] = yDaiExchangeRate.preciseMul(1.2 ether).toInt256();
+        units[0] = daiUnderlyingUnits;
+        units[1] = cDaiExchangeRate.preciseMul(cDaiUnderlyingUnits).toInt256();
+        units[2] = yDaiExchangeRate.preciseMul(yDaiUnderlyingUnits).toInt256();
 
-        setToken = ISetTokenIndex(factory.create(components, units, modules, address(this), "Test Yield Set", "YIELD"));
+        uint256 initNumComponents = 0;
+        for (uint256 i = 0; i < components.length; i++) {
+            if (units[i] != 0) {
+                initNumComponents++;
+            }
+        }
+
+        if (initNumComponents == 0) {
+            return false;
+        }
+
+        address[] memory initComponents = new address[](initNumComponents);
+        int256[] memory initUnits = new int256[](initNumComponents);
+
+        uint256 curr = 0;
+        uint256 dex = 0;
+        while (dex < initNumComponents) {
+            if (units[curr] != 0) {
+                initUnits[dex] = units[curr];
+                initComponents[dex] = components[curr];
+                dex++;
+            }
+            curr++;
+        }
+
+        setToken = ISetTokenIndex(factory.create(initComponents, initUnits, modules, address(this), "Test Yield Set", "YIELD"));
         baseManager = new BaseManagerV2(setToken, address(this), address(this));
         baseManager.authorizeInitialization();
         setFixture.wrapModuleV2().initialize(ISetTokenSet(address(setToken)));
@@ -88,10 +131,10 @@ contract IntrinsicProdRebalancing is DSTest {
         setToken.setManager(address(baseManager));
 
         // issue some sets
-        cDai.approve(address(setFixture.basicIssuanceModule()), 1000000 ether);
-        yDai.approve(address(setFixture.basicIssuanceModule()), 1000000 ether);
-        dai.approve(address(setFixture.basicIssuanceModule()), 1000000 ether);
-        setFixture.basicIssuanceModule().issue(ISetTokenSet(address(setToken)), 5.1 ether, address(this));
+        cDai.approve(address(setFixture.basicIssuanceModule()), 2**96);
+        yDai.approve(address(setFixture.basicIssuanceModule()), 2**96);
+        dai.approve(address(setFixture.basicIssuanceModule()), 2**96);
+        setFixture.basicIssuanceModule().issue(ISetTokenSet(address(setToken)), 0.3456 ether, address(this));
 
         // setup IPRebalanceExtension
         ipRebalanceExtension = new IPRebalanceExtension(
@@ -106,25 +149,32 @@ contract IntrinsicProdRebalancing is DSTest {
         ipRebalanceExtension.updateCallerStatus(callers, statuses);
         baseManager.addExtension(address(ipRebalanceExtension));
 
-        // setup wrap adapter
-        CompoundWrapV2Adapter wrapAdapter = new CompoundWrapV2Adapter();
-        setFixture.integrationRegistry().addIntegration(address(setFixture.wrapModuleV2()), "MockWrapV2Adapter", address(wrapAdapter));
-
         // setup TransferHelpers
-        compTransformHelper = new TransformHelperMock(cDaiExchangeRate, address(setFixture.wrapModuleV2()), "MockWrapV2Adapter");
         ipRebalanceExtension.setTransformInfo(
             address(cDai),
             IPRebalanceExtension.TransformInfo(address(dai), ITransformHelper(address(compTransformHelper)))
         );
-
-        yearnTransformHelper = new TransformHelperMock(yDaiExchangeRate, address(setFixture.wrapModuleV2()), "MockWrapV2Adapter");
         ipRebalanceExtension.setTransformInfo(
             address(yDai),
             IPRebalanceExtension.TransformInfo(address(dai), ITransformHelper(address(yearnTransformHelper)))
         );
+
+        return true;
     }
 
-    function test_untransform(uint96 targetDaiUnits, uint96 targetCDaiUnitsUnderlying, uint96 targetYDaiUnitsUnderlying) public {
+    function test_untransform(
+        uint96 startingDaiUnits,
+        uint96 startingCDaiUnitsUnderlying,
+        uint96 startingYDaiUnitsUnderlying,
+        uint96 targetDaiUnits,
+        uint96 targetCDaiUnitsUnderlying,
+        uint96 targetYDaiUnitsUnderlying
+    )
+        public
+    {
+        bool shouldContinue = initSet(startingDaiUnits, startingCDaiUnitsUnderlying, startingYDaiUnitsUnderlying);
+        if (!shouldContinue) return;
+
         uint256[] memory units = new uint256[](3);
         units[0] = targetDaiUnits;
         units[1] = targetCDaiUnitsUnderlying;
@@ -163,7 +213,7 @@ contract IntrinsicProdRebalancing is DSTest {
             targetCDaiUnitsUnderlying :
             initCDaiUnitsUnderlying;
         
-        assertTrue(isApproxEqual(finalCDaiUnitsUnderlying, expectedCDaiUnitsUnderlying));
+        assertTrue(isApproxEqual(finalCDaiUnitsUnderlying, expectedCDaiUnitsUnderlying, 10));
 
         uint256 finalYDaiUnits = setToken.getDefaultPositionRealUnit(address(yDai)).toUint256();
         uint256 finalYDaiUnitsUnderlying = finalYDaiUnits.preciseDiv(yDaiExchangeRate);
@@ -172,12 +222,23 @@ contract IntrinsicProdRebalancing is DSTest {
             targetYDaiUnitsUnderlying :
             initYDaiUnitsUnderlying;
         
-        assertTrue(isApproxEqual(finalYDaiUnitsUnderlying, expectedYDaiUnitsUnderlying));
+        assertTrue(isApproxEqual(finalYDaiUnitsUnderlying, expectedYDaiUnitsUnderlying, 10));
     }
 
-    function test_transform(uint96 targetDaiUnits, uint96 targetCDaiUnitsUnderlying, uint96 targetYDaiUnitsUnderlying) public {
-
+    function test_transform(
+        uint96 startingDaiUnits,
+        uint96 startingCDaiUnitsUnderlying,
+        uint96 startingYDaiUnitsUnderlying,
+        uint96 targetDaiUnits,
+        uint96 targetCDaiUnitsUnderlying,
+        uint96 targetYDaiUnitsUnderlying
+    )
+        public
+    {
         // setup
+        bool shouldContinue = initSet(startingDaiUnits, startingCDaiUnitsUnderlying, startingYDaiUnitsUnderlying);
+        if (!shouldContinue) return;
+
         uint256[] memory units = new uint256[](3);
         units[0] = targetDaiUnits;
         units[1] = targetCDaiUnitsUnderlying;
@@ -223,14 +284,17 @@ contract IntrinsicProdRebalancing is DSTest {
 
         uint256 finalCDaiUnits = setToken.getDefaultPositionRealUnit(address(cDai)).toUint256();
         uint256 finalCDaiUnitsUnderlying = finalCDaiUnits.preciseDiv(cDaiExchangeRate);
-        assertTrue(isApproxEqual(finalCDaiUnitsUnderlying, targetCDaiUnitsUnderlying) || daiUnits == 0);
+        assertTrue(isApproxEqual(finalCDaiUnitsUnderlying, targetCDaiUnitsUnderlying, 10) || daiUnits == 0);
 
         uint256 finalYDaiUnits = setToken.getDefaultPositionRealUnit(address(yDai)).toUint256();
         uint256 finalYDaiUnitsUnderlying = finalYDaiUnits.preciseDiv(yDaiExchangeRate);
-        assertTrue(isApproxEqual(finalYDaiUnitsUnderlying, targetYDaiUnitsUnderlying) || daiUnits == 0);
+        assertTrue(isApproxEqual(finalYDaiUnitsUnderlying, targetYDaiUnitsUnderlying, 10) || daiUnits == 0);
     }
 
     function test_transformRemaining(
+        uint96 startingDaiUnits,
+        uint96 startingCDaiUnitsUnderlying,
+        uint96 startingYDaiUnitsUnderlying,
         uint96 targetCDaiUnitsUnderlying,
         uint96 targetYDaiUnitsUnderlying,
         uint256 componentIndexSeed
@@ -238,6 +302,9 @@ contract IntrinsicProdRebalancing is DSTest {
         public 
     {
         // setup
+        bool shouldContinue = initSet(startingDaiUnits, startingCDaiUnitsUnderlying, startingYDaiUnitsUnderlying);
+        if (!shouldContinue) return;
+
         uint256[] memory units = new uint256[](3);
         units[0] = 0;   // target dai units must be 0
         units[1] = targetCDaiUnitsUnderlying;
@@ -268,7 +335,18 @@ contract IntrinsicProdRebalancing is DSTest {
         assertEq(finalUnderlyingUnits, 0);
     }
 
-    function test_startTrades(uint96 targetDaiUnits, uint96 targetCDaiUnitsUnderlying, uint96 targetYDaiUnitsUnderlying) public {
+    function test_startTrades(
+        uint96 startingDaiUnits,
+        uint96 startingCDaiUnitsUnderlying,
+        uint96 startingYDaiUnitsUnderlying,
+        uint96 targetDaiUnits,
+        uint96 targetCDaiUnitsUnderlying,
+        uint96 targetYDaiUnitsUnderlying
+    )
+        public
+    {
+        bool shouldContinue = initSet(startingDaiUnits, startingCDaiUnitsUnderlying, startingYDaiUnitsUnderlying);
+        if (!shouldContinue) return;
 
         uint256[] memory units = new uint256[](3);
         units[0] = targetDaiUnits;
@@ -300,14 +378,14 @@ contract IntrinsicProdRebalancing is DSTest {
         assertEq(actualDaiTarget, daiTarget);
     }
 
-    function isApproxEqual(uint256 a, uint256 b) internal returns (bool) {
+    function isApproxEqual(uint256 a, uint256 b, uint256 error) internal returns (bool) {
         bool passed;
-        if (b < 2) {
-            passed = a <= 2;
-        } else if (b > uint(-1) - 2) {
-            passed = a >= uint(-1) - 2;
+        if (b < error) {
+            passed = a <= error;
+        } else if (b > uint(-1) - error) {
+            passed = a >= uint(-1) - error;
         } else {
-            passed = a <= b + 2 && a >= b - 2;
+            passed = a <= b + error && a >= b - error;
         }
         if (!passed) {
             log_named_uint("a", a);
