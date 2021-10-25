@@ -300,7 +300,19 @@ contract IntrinsicProdRebalancing is DSTest {
         assertEq(actualDaiTarget, daiTarget);
     }
 
-    function isApproxEqual(uint256 a, uint256 b) internal pure returns (bool) {
-        return a == b || a == b+1 || a+1 == b;
+    function isApproxEqual(uint256 a, uint256 b) internal returns (bool) {
+        bool passed;
+        if (b < 2) {
+            passed = a <= 2;
+        } else if (b > uint(-1) - 2) {
+            passed = a >= uint(-1) - 2;
+        } else {
+            passed = a <= b + 2 && a >= b - 2;
+        }
+        if (!passed) {
+            log_named_uint("a", a);
+            log_named_uint("b", b);
+        }
+        return passed;
     }
 }
